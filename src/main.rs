@@ -1,91 +1,152 @@
-use rand::Rng;
 use std::io::{self, Write};
-use std::time::Instant;
+use std::str::FromStr;
 
-// 提取输入校验函数
-fn parse_guess(input: &str, min: u32, max: u32) -> Option<u32> {
-    let input = input.trim();
-    if !input.chars().all(|c| c.is_ascii_digit()) || input.is_empty() {
-        return None;
-    }
-    match input.parse() {
-        Ok(num) if num >= min && num <= max => Some(num),
-        _ => None,
-    }
+#[derive(Debug, PartialEq)]
+enum TempUnit {
+    Celsius,
+    Fahrenheit,
+    Kelvin,
 }
 
-// 提取猜测判断函数
-fn check_guess(guess: u32, secret: u32) -> &'static str {
-    if guess == secret {
-        "equal"
-    } else if guess < secret {
-        "less"
-    } else {
-        "greater"
-    }
+#[derive(Debug, PartialEq)]
+struct Temperature {
+    value: f64,
+    unit: TempUnit,
 }
 
-fn main() {
-    // 生成一个 1 到 100 之间的随机数，作为答案
-    let secret = rand::rng().random_range(1..=100);
-    let mut attempts = 0; // 猜测次数统计
-    let start_time = Instant::now(); // 记录开始时间
-    println!("请输入一个 1 到 100 之间的数字：");
-    loop {
-        // 提示用户输入
-        print!("你的猜测: ");
-        io::stdout().flush().unwrap(); // 刷新输出缓冲区，确保提示立即显示
-        let mut guess = String::new();
-        io::stdin().read_line(&mut guess).unwrap(); // 读取用户输入
-        let guess = guess.trim(); // 去除首尾空白字符
-        // 只允许输入数字
-        let guess: u32 = match parse_guess(guess, 1, 100) {
-            Some(num) => num,
-            None => {
-                println!("只允许输入 1 到 100 之间的数字！");
-                continue;
-            }
-        };
-        attempts += 1; // 每次有效猜测次数加一
-        // 判断用户输入与答案的关系
-        match check_guess(guess, secret) {
-            "equal" => {
-                let duration = start_time.elapsed(); // 计算用时
-                println!("恭喜你，猜对了！一共猜了 {} 次。", attempts);
-                println!("总共用时：{:.2} 秒。", duration.as_secs_f64());
-                break; // 猜对则退出循环
-            }
-            "less" => println!("太小了！"),
-            "greater" => println!("太大了！"),
-            _ => unreachable!(),
+impl Temperature {
+    // 转为摄氏度
+    fn to_celsius(&self) -> f64 {
+        match self.unit {
+            TempUnit::Celsius => self.value,
+            TempUnit::Fahrenheit => (self.value - 32.0) * 5.0 / 9.0,
+            TempUnit::Kelvin => self.value - 273.15,
+        }
+    }
+    // 转为华氏度
+    fn to_fahrenheit(&self) -> f64 {
+        match self.unit {
+            TempUnit::Celsius => self.value * 9.0 / 5.0 + 32.0,
+            TempUnit::Fahrenheit => self.value,
+            TempUnit::Kelvin => (self.value - 273.15) * 9.0 / 5.0 + 32.0,
+        }
+    }
+    // 转为开尔文
+    fn to_kelvin(&self) -> f64 {
+        match self.unit {
+            TempUnit::Celsius => self.value + 273.15,
+            TempUnit::Fahrenheit => (self.value - 32.0) * 5.0 / 9.0 + 273.15,
+            TempUnit::Kelvin => self.value,
         }
     }
 }
 
-// 单元测试模块
+impl FromStr for TempUnit {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "c" | "℃" => Ok(TempUnit::Celsius),
+            "f" | "℉" => Ok(TempUnit::Fahrenheit),
+            "k" => Ok(TempUnit::Kelvin),
+            _ => Err(()),
+        }
+    }
+}
+
+impl FromStr for Temperature {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        let (num_part, unit_part) = s.trim().split_at(
+            s.find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+                .unwrap_or(s.len())
+        );
+        let value: f64 = num_part.trim().parse().map_err(|_| "无法解析数值".to_string())?;
+        let unit = if unit_part.trim().is_empty() {
+            TempUnit::Celsius // 默认摄氏度
+        } else {
+            TempUnit::from_str(unit_part.trim()).map_err(|_| "无法识别单位".to_string())?
+        };
+        Ok(Temperature { value, unit })
+    }
+}
+
+fn main() {
+    println!("请输入温度（如 32F、100C、273.15K，单位可省略，默认为摄氏度）：");
+    print!("> ");
+    io::stdout().flush().unwrap();
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).unwrap();
+
+    let temp = match Temperature::from_str(&input) {
+        Ok(t) => t,
+        Err(e) => {
+            println!("输入错误: {}", e);
+            return;
+        }
+    };
+
+    println!(
+        "原始输入: {:.2} {:?}\n摄氏度: {:.2}℃\n华氏度: {:.2}℉\n开尔文: {:.2}K",
+        temp.value,
+        temp.unit,
+        temp.to_celsius(),
+        temp.to_fahrenheit(),
+        temp.to_kelvin()
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_guess_valid() {
-        assert_eq!(parse_guess("42", 1, 100), Some(42));
-        assert_eq!(parse_guess("  1 ", 1, 100), Some(1));
-        assert_eq!(parse_guess("100", 1, 100), Some(100));
+    fn test_parse_temperature() {
+        assert_eq!(
+            Temperature::from_str("100C").unwrap(),
+            Temperature { value: 100.0, unit: TempUnit::Celsius }
+        );
+        assert_eq!(
+            Temperature::from_str("32F").unwrap(),
+            Temperature { value: 32.0, unit: TempUnit::Fahrenheit }
+        );
+        assert_eq!(
+            Temperature::from_str("273.15K").unwrap(),
+            Temperature { value: 273.15, unit: TempUnit::Kelvin }
+        );
+        assert_eq!(
+            Temperature::from_str("0").unwrap(),
+            Temperature { value: 0.0, unit: TempUnit::Celsius }
+        );
     }
 
     #[test]
-    fn test_parse_guess_invalid() {
-        assert_eq!(parse_guess("abc", 1, 100), None);
-        assert_eq!(parse_guess("", 1, 100), None);
-        assert_eq!(parse_guess("0", 1, 100), None);
-        assert_eq!(parse_guess("101", 1, 100), None);
+    fn test_to_celsius() {
+        let t = Temperature { value: 32.0, unit: TempUnit::Fahrenheit };
+        assert!((t.to_celsius() - 0.0).abs() < 1e-6);
+        let t = Temperature { value: 273.15, unit: TempUnit::Kelvin };
+        assert!((t.to_celsius() - 0.0).abs() < 1e-6);
     }
 
     #[test]
-    fn test_check_guess() {
-        assert_eq!(check_guess(50, 50), "equal");
-        assert_eq!(check_guess(30, 50), "less");
-        assert_eq!(check_guess(70, 50), "greater");
+    fn test_to_fahrenheit() {
+        let t = Temperature { value: 0.0, unit: TempUnit::Celsius };
+        assert!((t.to_fahrenheit() - 32.0).abs() < 1e-6);
+        let t = Temperature { value: 273.15, unit: TempUnit::Kelvin };
+        assert!((t.to_fahrenheit() - 32.0).abs() < 1e-6);
     }
-} 
+
+    #[test]
+    fn test_to_kelvin() {
+        let t = Temperature { value: 0.0, unit: TempUnit::Celsius };
+        assert!((t.to_kelvin() - 273.15).abs() < 1e-6);
+        let t = Temperature { value: 32.0, unit: TempUnit::Fahrenheit };
+        assert!((t.to_kelvin() - 273.15).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_invalid_input() {
+        assert!(Temperature::from_str("abc").is_err());
+        assert!(Temperature::from_str("100X").is_err());
+    }
+}
